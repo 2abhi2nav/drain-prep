@@ -1,0 +1,40 @@
+# Preparedness actions. `tiers` lists the lowest tier at which the action is triggered
+# (it carries forward to higher tiers). Criteria scores are 1-5 (higher = better for
+# the city, i.e. cost is scored as affordability).
+actions:
+  - id: drain_inspection
+    name: Inspect and clear storm-drain inlets and culverts
+    min_tier: Watch
+    scores: {impact: 3, urgency: 3, lead_time: 4, affordability: 5, feasibility: 5}
+  - id: desilting
+    name: Targeted desilting of major canals (Buckingham, Otteri Nullah, Cooum mouth)
+    min_tier: Watch
+    scores: {impact: 4, urgency: 2, lead_time: 1, affordability: 2, feasibility: 3}
+  - id: public_advisory
+    name: Issue public rainfall advisory via SMS / social media
+    min_tier: Watch
+    scores: {impact: 3, urgency: 4, lead_time: 5, affordability: 5, feasibility: 5}
+  - id: pump_deployment
+    name: Pre-position dewatering pumps at known low-lying subways
+    min_tier: Alert
+    scores: {impact: 5, urgency: 4, lead_time: 3, affordability: 3, feasibility: 4}
+  - id: control_room
+    name: Activate 24x7 flood control room and ward-level teams
+    min_tier: Alert
+    scores: {impact: 4, urgency: 5, lead_time: 4, affordability: 4, feasibility: 5}
+  - id: reservoir_release
+    name: Coordinate staged releases from Chembarambakkam / Puzhal reservoirs
+    min_tier: Alert
+    scores: {impact: 5, urgency: 4, lead_time: 2, affordability: 5, feasibility: 3}
+  - id: shelter_readiness
+    name: Open relief shelters and stock food, water, medicines
+    min_tier: Emergency
+    scores: {impact: 5, urgency: 5, lead_time: 2, affordability: 2, feasibility: 3}
+  - id: rescue_teams
+    name: Pre-deploy NDRF/SDRF boats and rescue teams
+    min_tier: Emergency
+    scores: {impact: 5, urgency: 5, lead_time: 3, affordability: 2, feasibility: 3}
+  - id: power_isolation
+    name: Pre-emptive power isolation in inundation-prone feeders
+    min_tier: Emergency
+    scores: {impact: 4, urgency: 4, lead_time: 5, affordability: 4, feasibility: 4}

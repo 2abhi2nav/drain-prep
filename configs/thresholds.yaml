@@ -1,0 +1,15 @@
+# Risk tiers, lowest to highest. A day is placed in the highest tier for which ANY
+# criterion is met by EITHER its 1-day or its trailing 3-day accumulation.
+#   percentile:    empirical percentile among historical wet days (>= wet_day_mm)
+#   return_period: years, from the GEV/Gumbel fit to that accumulation's annual maxima
+# Return periods below ~1.5 y are not meaningful on annual maxima, so Watch is
+# percentile-based and Alert/Emergency are return-period based.
+wet_day_mm: 2.5
+tiers:
+  - name: Normal
+  - name: Watch
+    percentile: 95
+  - name: Alert
+    return_period: 2
+  - name: Emergency
+    return_period: 10

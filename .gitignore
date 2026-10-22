@@ -1,0 +1,22 @@
+# Docs / notes are kept local
+*.md
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+.pytest_cache/
+build/
+dist/
+
+# Data (raw IMD binaries are large; interim/processed are regenerable)
+data/raw/*
+data/interim/*
+data/processed/*
+!data/**/.gitkeep
+outputs/**/*
+!outputs/**/.gitkeep
+
+.streamlit/secrets.toml
+.ipynb_checkpoints/

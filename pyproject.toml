@@ -1,0 +1,33 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "drainage-rec"
+version = "0.1.0"
+description = "Chennai rainfall-based urban drainage preparedness recommender"
+requires-python = ">=3.10"
+dependencies = [
+    "imdlib>=0.4",
+    "numpy",
+    "pandas",
+    "xarray",
+    "scipy",
+    "pymannkendall",
+    "statsmodels",
+    "pyyaml",
+    "streamlit",
+    "plotly",
+]
+
+[project.optional-dependencies]
+dev = ["pytest", "matplotlib"]
+
+[project.scripts]
+drainage-rec = "drainage_rec.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

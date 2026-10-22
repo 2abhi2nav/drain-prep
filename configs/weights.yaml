@@ -1,0 +1,14 @@
+# AHP pairwise comparison matrix on Saaty's 1-9 scale. Entry [i][j] states how much
+# more important criterion i is than criterion j. Only the upper triangle is read;
+# the lower triangle is filled with reciprocals.
+criteria: [impact, urgency, lead_time, affordability, feasibility]
+pairwise:
+  impact:        {urgency: 2, lead_time: 3, affordability: 5, feasibility: 3}
+  urgency:       {lead_time: 2, affordability: 4, feasibility: 2}
+  lead_time:     {affordability: 3, feasibility: 1}
+  affordability: {feasibility: 1/2}
+sensitivity:
+  perturbation: 0.25          # +/- fraction applied to each weight
+  n_samples: 2000             # Monte Carlo draws (Dirichlet around AHP weights)
+  dirichlet_concentration: 50
+  seed: 42

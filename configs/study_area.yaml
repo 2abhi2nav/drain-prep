@@ -1,0 +1,12 @@
+# Chennai study area on the IMD 0.25 deg grid (cell centres at multiples of 0.25).
+# Of the 3x3 block around the city, the eastern column (80.5E) and (13.0N, 80.25E)
+# are flagged as sea/missing in the IMD land mask, so the city series is the mean
+# of the remaining valid land cells.
+name: Chennai
+lat_min: 12.75
+lat_max: 13.25
+lon_min: 80.0
+lon_max: 80.5
+aggregation: mean        # mean | max  across valid cells
+start_year: 1901
+end_year: 2024
