@@ -1,6 +1,3 @@
-# Docs / notes are kept local
-*.md
-
 # Python
 __pycache__/
 *.py[cod]
