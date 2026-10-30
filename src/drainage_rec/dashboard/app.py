@@ -15,13 +15,20 @@ from drainage_rec.dashboard.theme import (
 )
 from drainage_rec.decision.ahp import ahp_weights
 from drainage_rec.decision.matrix import contribution, score_actions
+from drainage_rec.power import (
+    fit_station_generation_regression, load_station_priorities, load_zone_demographics,
+    score_power_preparedness,
+)
 from drainage_rec.recommend import MODEL_PATH, Recommender
-from drainage_rec.risk.tiers import TIER_ORDER
 from drainage_rec.stats.distributions import Fit
-from drainage_rec.stats.frequency import empirical_exceedance
+from drainage_rec.stats.predictive import fit_heavy_rain_model
 from drainage_rec.utils.config import PROCESSED_DIR
 
-st.set_page_config(page_title="Chennai Drainage Preparedness", page_icon="🌧️", layout="wide")
+st.set_page_config(page_title="Chennai Power Preparedness PoC", page_icon="🌧️", layout="wide")
+st.markdown(
+    "<style>[data-testid='stPlotlyChart'] { margin-top: 1rem; }</style>",
+    unsafe_allow_html=True,
+)
 
 
 # --------------------------------------------------------------------------- data
@@ -35,23 +42,12 @@ def load_all() -> dict:
     d = {
         "summary": json.loads((PROCESSED_DIR / "summary.json").read_text()),
         "classified": _csv("classified_days", parse_dates=["date"], index_col="date"),
-        "amax": _csv("annual_maxima", index_col="year"),
-        "fits": _csv("distribution_fits"),
-        "return_levels": _csv("return_levels"),
-        "trends": _csv("trends", index_col=0),
-        "freq": _csv("frequency_summary", index_col=0),
-        "exceed": _csv("exceedance_counts", index_col="year"),
-        "monthly": _csv("monthly_climatology", index_col="month"),
         "thresholds": _csv("tier_thresholds_mm", index_col=0),
-        "tier_dist": _csv("tier_distribution", index_col=0),
-        "tier_year": _csv("tier_counts_by_year", index_col="year"),
-        "episodes": _csv("alert_episodes"),
         "pairwise": _csv("ahp_pairwise", index_col=0),
         "oat": _csv("sensitivity_oat"),
         "mc": _csv("sensitivity_mc_summary", index_col=0),
         "rank_freq": _csv("sensitivity_rank_frequency", index_col=0),
         "tau": _csv("sensitivity_mc_tau"),
-        "events": _csv("known_events_validation"),
     }
     return d
 
@@ -61,8 +57,13 @@ def load_recommender() -> Recommender:
     return Recommender.load()
 
 
+@st.cache_resource
+def load_predictive_model():
+    return fit_heavy_rain_model()
+
+
 if not MODEL_PATH.exists():
-    st.title("Chennai Drainage Preparedness Recommender")
+    st.title("Chennai Power Preparedness")
     st.error(
         "No processed data yet. Run `make data` (downloads IMD rainfall, slow) "
         "and then `make pipeline`, and reload this page."
@@ -71,6 +72,8 @@ if not MODEL_PATH.exists():
 
 D = load_all()
 REC = load_recommender()
+RAIN_MODEL = load_predictive_model()
+ZONES = load_zone_demographics()
 criteria = REC.criteria
 ahp_default = dict(zip(criteria, REC.weights))
 
@@ -97,16 +100,12 @@ def fit_for(acc: str) -> Fit:
 # --------------------------------------------------------------------------- sidebar
 
 with st.sidebar:
-    st.markdown("### Chennai drainage preparedness")
+    st.markdown("### Chennai Power Preparedness")
     s = D["summary"]
-    st.caption(
-        f"IMD 0.25° gridded rainfall, {s['period'][0][:4]}–{s['period'][1][:4]} "
-        f"({s['years']} years), city-mean of the land grid cells over Chennai."
-    )
+    st.caption(f"IMD rainfall · {s['period'][0][:4]}–{s['period'][1][:4]}")
     st.divider()
     st.markdown("**Decision weights**")
-    custom = st.toggle("Override AHP weights", value=False,
-                       help="Try your own weights; the recommendation and decision matrix update live.")
+    custom = st.toggle("Override AHP weights", value=False)
     weights = {}
     for c in criteria:
         weights[c] = st.slider(c.replace("_", " ").title(), 0.0, 1.0, float(round(ahp_default[c], 3)),
@@ -120,22 +119,23 @@ with st.sidebar:
 
 rec = Recommender(REC.model, REC.actions, criteria, w_vec)
 
-tabs = st.tabs(["Recommend", "Rainfall record", "Extreme values", "Decision matrix", "Validation", "About"])
+tabs = st.tabs(["Forecast", "Population priority", "Power stations", "Decision Matrix"])
 
 # --------------------------------------------------------------------------- Recommend
 
 with tabs[0]:
-    st.subheader("What should the city prepare for?")
-    st.caption("Enter observed or forecast rainfall for Chennai, or replay a historical day.")
+    st.subheader("Chennai rainfall forecast")
 
     cls = D["classified"]
     mode = st.radio("Input", ["Enter rainfall", "Replay a historical day"], horizontal=True,
                     label_visibility="collapsed")
     if mode == "Enter rainfall":
-        c1, c2 = st.columns(2)
+        c1, c2, c3 = st.columns(3)
         r1 = c1.number_input("1-day rainfall (mm)", 0.0, 1000.0, 80.0, 5.0)
         r3 = c2.number_input("3-day accumulated rainfall (mm)", 0.0, 2000.0, 160.0, 10.0,
                              help="Total over the assessed day and the two days before it.")
+        forecast_month = c3.selectbox("Forecast month", range(1, 13),
+                                      format_func=lambda m: pd.Timestamp(year=2000, month=m, day=1).strftime("%B"))
     else:
         default = pd.Timestamp("2015-12-02")
         if default not in cls.index:
@@ -144,12 +144,16 @@ with tabs[0]:
                             max_value=cls.index.max().date())
         row = cls.loc[pd.Timestamp(day)]
         r1, r3 = float(row["rain_1d"]), float(row["rain_3d"])
+        forecast_month = day.month
         st.caption(f"Observed: {r1:.1f} mm on the day, {r3:.1f} mm over 3 days.")
 
     out = rec.recommend(r1, r3)
-    left, right = st.columns([1, 2], gap="large")
+    heavy_probability = float(RAIN_MODEL.predict_probability(r1, r3, forecast_month)[0])
+    left, right = st.columns([1, 1.5], gap="large")
     with left:
         st.markdown(tier_badge(out.tier), unsafe_allow_html=True)
+        st.metric("Logistic heavy-rain probability", f"{heavy_probability:.1%}",
+                  help="Estimated probability of at least 64.5 mm in 24 hours, based on historical Chennai rainfall patterns.")
         st.write("")
         driver_label = SERIES_LABEL[out.driver]
         st.caption(f"Driven by the **{driver_label.lower()}**.")
@@ -168,25 +172,6 @@ with tabs[0]:
         )
 
     with right:
-        if not out.actions:
-            st.success("No preparedness actions triggered. Routine monitoring only.")
-        else:
-            st.markdown(f"**{len(out.actions)} actions, highest priority first**")
-            tbl = pd.DataFrame(out.actions)[["rank", "name", "min_tier", "score"]]
-            st.dataframe(
-                tbl,
-                hide_index=True,
-                width="stretch",
-                column_config={
-                    "rank": st.column_config.NumberColumn("#", width="small"),
-                    "name": st.column_config.TextColumn("Action", width="large"),
-                    "min_tier": st.column_config.TextColumn("Triggered from"),
-                    "score": st.column_config.ProgressColumn("Priority score", min_value=0, max_value=1,
-                                                             format="%.3f"),
-                },
-            )
-
-        # Where the input sits on each fitted return-level curve
         fig = go.Figure()
         T = np.logspace(np.log10(1.01), 3, 200)
         for k in ("rain_1d", "rain_3d"):
@@ -209,132 +194,226 @@ with tabs[0]:
         st.plotly_chart(style(fig, 340, title="Where today's rainfall sits on the fitted extremes"),
                         width="stretch")
 
-# --------------------------------------------------------------------------- Rainfall record
+    st.markdown("#### Logistic model diagnostics")
+    metrics = RAIN_MODEL.metrics
+    m1, m2, m3, m4, m5 = st.columns(5)
+    m1.metric("Holdout ROC AUC", f"{metrics['auc']:.3f}")
+    m2.metric("Average precision", f"{metrics['average_precision']:.3f}")
+    m3.metric("Brier score", f"{metrics['brier']:.3f}")
+    m4.metric("Precision @ 0.5", f"{metrics['precision']:.1%}")
+    m5.metric("Recall @ 0.5", f"{metrics['recall']:.1%}")
+    st.caption(f"Heavy rain: ≥64.5 mm/24h · Train before 2015 · Holdout {metrics['test_start']}–{metrics['test_end']}. Observed rainfall stands in for archived forecasts.")
+    c1, c2 = st.columns(2)
+    with c1:
+        roc = metrics["roc"]
+        fig = go.Figure()
+        fig.add_scatter(x=roc["false_positive_rate"], y=roc["true_positive_rate"], mode="lines",
+                        name="Logistic model", line=dict(color=SERIES["rain_1d"], width=2))
+        fig.add_scatter(x=[0, 1], y=[0, 1], mode="lines", name="Chance", line=dict(color=MUTED, dash="dot"))
+        fig.update_xaxes(title="False positive rate")
+        fig.update_yaxes(title="True positive rate")
+        st.plotly_chart(style(fig, 300, title="ROC curve"), width="stretch")
+    with c2:
+        pr = metrics["precision_recall"]
+        fig = go.Figure(go.Scatter(x=pr["recall"], y=pr["precision"], mode="lines",
+                                   line=dict(color=SERIES["rain_3d"], width=2), name="Logistic model"))
+        fig.update_xaxes(title="Recall", range=[0, 1])
+        fig.update_yaxes(title="Precision", range=[0, 1])
+        st.plotly_chart(style(fig, 300, title="Precision-recall curve"), width="stretch")
+    c1, c2 = st.columns(2)
+    with c1:
+        calibration = metrics["calibration"]
+        fig = go.Figure()
+        fig.add_scatter(x=calibration["predicted"], y=calibration["observed"], mode="lines+markers",
+                        name="Observed by probability decile", line=dict(color=SERIES["rain_3d"], width=2))
+        fig.add_scatter(x=[0, 1], y=[0, 1], mode="lines", name="Perfect calibration",
+                        line=dict(color=MUTED, dash="dot"))
+        fig.update_xaxes(title="Mean predicted probability")
+        fig.update_yaxes(title="Observed heavy-rain fraction", range=[0, 1])
+        st.plotly_chart(style(fig, 300, title="Probability calibration"), width="stretch")
+        matrix = metrics["confusion"]
+        fig = go.Figure(go.Heatmap(z=matrix, x=["Predicted no", "Predicted heavy"],
+                                   y=["Actual no", "Actual heavy"], text=matrix,
+                                   texttemplate="%{text}", colorscale="Blues", showscale=False))
+        st.plotly_chart(style(fig, 300, title="Confusion matrix · threshold 0.5"), width="stretch")
+    with c2:
+        coefficients = metrics["coefficients"].rename({
+            "log_1d_rain": "Log 1-day rainfall", "log_3d_rain": "Log 3-day rainfall",
+            "month_sin": "Season sine", "month_cos": "Season cosine",
+        })
+        fig = go.Figure(go.Bar(x=coefficients.values, y=coefficients.index, orientation="h",
+                               marker_color=SERIES["rain_1d"]))
+        fig.update_xaxes(title="Standardized coefficient (log-odds)")
+        st.plotly_chart(style(fig, 300, title="Logistic model coefficients"), width="stretch")
+
+# --------------------------------------------------------------------------- Power preparedness
 
 with tabs[1]:
-    cls = D["classified"]
-    years = sorted(cls.index.year.unique())
-    yr = st.select_slider("Year", options=years, value=2015 if 2015 in years else years[-1])
-    y = cls[cls.index.year == yr]
-    fig = go.Figure()
-    for k in ("rain_1d", "rain_3d"):
-        fig.add_scatter(x=y.index, y=y[k], name=SERIES_LABEL[k], mode="lines",
-                        line=dict(color=SERIES[k], width=2 if k == "rain_1d" else 1.5),
-                        hovertemplate="%{y:.1f} mm")
-    elevated = y[y["tier"].isin(["Alert", "Emergency"])]
-    for t in ("Alert", "Emergency"):
-        e = elevated[elevated["tier"] == t]
-        if len(e):
-            fig.add_scatter(x=e.index, y=e["rain_3d"], mode="markers", name=f"{TIER_ICON[t]} {t} day",
-                            marker=dict(size=10, color=TIER_COLOR[t], symbol="triangle-up" if t == "Alert" else "hexagon",
-                                        line=dict(color="#fcfcfb", width=2)),
-                            hovertemplate=f"{t}: %{{y:.0f}} mm (3-day)<extra></extra>")
-    fig.update_layout(hovermode="x unified")
-    fig.update_yaxes(title="mm")
-    st.plotly_chart(style(fig, 340, title=f"Daily rainfall over Chennai, {yr}"), width="stretch")
+    st.subheader("Population priority by Chennai zone")
 
-    c1, c2 = st.columns(2)
-    amax = D["amax"]
-    tr = D["trends"]
+    c1, c2, c3 = st.columns([1, 1, 1])
     with c1:
-        acc = st.radio("Annual maximum of", ["rain_1d", "rain_3d"], format_func=SERIES_LABEL.get, horizontal=True)
-        s_ = amax[acc]
-        fig = go.Figure()
-        fig.add_scatter(x=s_.index, y=s_, mode="lines+markers", name=SERIES_LABEL[acc],
-                        line=dict(color=SERIES[acc], width=1.5), marker=dict(size=5),
-                        hovertemplate="%{x}: %{y:.0f} mm<extra></extra>")
-        slope = tr.loc[acc, "sen_slope_mm_per_decade"] / 10
-        med_x, med_y = np.median(s_.index), np.median(s_)
-        xs = np.array([s_.index.min(), s_.index.max()])
-        fig.add_scatter(x=xs, y=med_y + slope * (xs - med_x), mode="lines", name="Sen's slope",
-                        line=dict(color="#52514e", width=2, dash="dash"), hoverinfo="skip")
-        fig.update_yaxes(title="mm")
-        st.plotly_chart(style(fig, 320, title="Annual maxima and trend"), width="stretch")
-        r = tr.loc[acc]
-        st.caption(
-            f"Mann-Kendall: **{r['mk_trend']}** (τ = {float(r['mk_tau']):.3f}, p = {float(r['mk_pvalue']):.3f}). "
-            f"Sen's slope {float(r['sen_slope_mm_per_decade']):+.1f} mm/decade; OLS {float(r['ols_slope_mm_per_decade']):+.1f} "
-            f"mm/decade (95% CI {float(r['ols_ci_lower']):+.1f} to {float(r['ols_ci_upper']):+.1f})."
-        )
+        st.markdown("**IMD forecast products**")
+        st.link_button("Chennai 7-day forecast and warnings", "https://mausam.imd.gov.in/chennai/mcdata/chn_fcst_mng.pdf")
+        st.link_button("24-hour district rainfall forecast", "https://mausam.imd.gov.in/chennai/mcdata/distfcst.pdf")
     with c2:
-        mon = D["monthly"]
-        names = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
-        fig = go.Figure(go.Bar(x=names, y=mon["mean"], marker_color=SERIES["rain_1d"],
-                               error_y=dict(type="data", array=mon["std"], color=MUTED, thickness=1),
-                               customdata=mon["share"] * 100,
-                               hovertemplate="%{x}: %{y:.0f} mm (±%{error_y.array:.0f} sd), %{customdata:.0f}% of annual<extra></extra>"))
-        fig.update_yaxes(title="Mean monthly total (mm)")
-        st.plotly_chart(style(fig, 320, title="Monthly climatology (NE monsoon dominates)", bargap=0.25),
-                        width="stretch")
+        st.markdown("**IMD warning products**")
+        st.link_button("Chennai district warnings / nowcast", "https://mausam.imd.gov.in/imd_latest/contents/districtwisewarnings_mc.php?id=26")
+        st.link_button("7-day regional forecast and warnings", "https://mausam.imd.gov.in/chennai/mcdata/chennaiinf.pdf")
+    with c3:
+        st.info("Enter values from the linked IMD products.")
 
-    ex = D["exceed"]
-    dec = ex.groupby((ex.index // 10) * 10).mean()
-    fig = go.Figure()
-    labels = {"heavy_64_5": "Heavy (≥ 64.5 mm)", "very_heavy_115_6": "Very heavy (≥ 115.6 mm)",
-              "extreme_204_5": "Extremely heavy (≥ 204.5 mm)"}
-    for i, (col, lab) in enumerate(labels.items()):
-        fig.add_bar(x=dec.index.astype(str) + "s", y=dec[col], name=lab, marker_color=SEQUENTIAL[2 + 2 * i],
-                    hovertemplate="%{x}: %{y:.2f} days/yr<extra>" + lab + "</extra>")
-    fig.update_yaxes(title="Days per year (decade mean)")
-    st.plotly_chart(style(fig, 320, title="Frequency of heavy-rain days by decade", barmode="group", bargap=0.2,
-                          bargroupgap=0.08), width="stretch")
-    fq = D["freq"].rename(index=labels)
-    st.dataframe(fq.style.format({"rate_per_year": "{:.2f}", "ci_lower": "{:.2f}", "ci_upper": "{:.2f}",
-                                  "years": "{:.0f}"}), width="stretch")
-    st.caption("Mean days per year with exact Poisson 95% confidence intervals.")
+    input_cols = ["Zone Name", "Next 24h rainfall (mm)", "Observed 3-day total (mm)"]
+    zone_inputs = ZONES[["Zone Name"]].copy()
+    zone_inputs["Next 24h rainfall (mm)"] = 0.0
+    zone_inputs["Observed 3-day total (mm)"] = 0.0
+    input1, input2 = st.columns([1, 3])
+    with input1:
+        forecast_month = st.selectbox("Forecast month", range(1, 13),
+                                      format_func=lambda m: pd.Timestamp(year=2000, month=m, day=1).strftime("%B"),
+                                      key="zones_forecast_month")
+        imd_warning = st.selectbox("IMD warning level", ["No warning", "Yellow", "Orange", "Red"],
+                                   key="zones_imd_warning")
+    with input2:
+        edited_inputs = st.data_editor(
+            zone_inputs[input_cols], hide_index=True, width="stretch", key="zone_rain_inputs",
+            column_config={
+                "Zone Name": st.column_config.TextColumn(disabled=True),
+                "Next 24h rainfall (mm)": st.column_config.NumberColumn(min_value=0, max_value=1000, step=5),
+                "Observed 3-day total (mm)": st.column_config.NumberColumn(min_value=0, max_value=2000, step=10),
+            },
+        )
 
-# --------------------------------------------------------------------------- Extremes
+    probabilities = RAIN_MODEL.predict_probability(
+        edited_inputs["Next 24h rainfall (mm)"].to_numpy(),
+        edited_inputs["Observed 3-day total (mm)"].to_numpy(),
+        np.full(len(edited_inputs), forecast_month),
+    )
+    zone_scores = score_power_preparedness(ZONES, probabilities, imd_warning)
+    zone_scores = zone_scores.merge(edited_inputs, on="Zone Name", how="left")
+    zone_scores["expected_heavy_rain_population"] = zone_scores["population"] * zone_scores["effective_probability"]
+    mean_probability = float(np.average(zone_scores["effective_probability"], weights=zone_scores["population"]))
+    m1, m2, m3 = st.columns(3)
+    m1.metric("Population-weighted heavy-rain probability", f"{mean_probability:.1%}")
+    m2.metric("Highest-priority zone", str(zone_scores.iloc[0]["Zone Name"]))
+    m3.metric("Residents weighted by rain probability",
+              f"{zone_scores['expected_heavy_rain_population'].sum():,.0f}")
 
-with tabs[2]:
-    st.subheader("Extreme-value analysis of annual maxima")
-    rl = D["return_levels"]
-    cols = st.columns(2)
-    for col, k in zip(cols, ("rain_1d", "rain_3d")):
-        with col:
-            f = fit_for(k)
-            emp = empirical_exceedance(D["amax"][k])
-            t = rl[rl["accumulation"] == k]
-            T = np.logspace(np.log10(1.05), np.log10(200), 200)
-            fig = go.Figure()
-            fig.add_scatter(x=t["return_period"], y=t["ci_upper"], mode="lines", line=dict(width=0),
-                            showlegend=False, hoverinfo="skip")
-            fig.add_scatter(x=t["return_period"], y=t["ci_lower"], mode="lines", line=dict(width=0),
-                            fill="tonexty", fillcolor="rgba(42,120,214,0.15)", name="95% bootstrap CI",
-                            hoverinfo="skip")
-            fig.add_scatter(x=T, y=f.ppf(1 - 1 / T), mode="lines", name=f"{f.dist.upper()} fit",
-                            line=dict(color=SERIES[k], width=2),
-                            hovertemplate="%{x:.0f}-year: %{y:.0f} mm<extra></extra>")
-            fig.add_scatter(x=emp["return_period"], y=emp["value"], mode="markers", name="Observed (Weibull)",
-                            marker=dict(size=8, color="#fcfcfb", line=dict(color=SERIES[k], width=1.5)),
-                            hovertemplate="%{y:.0f} mm, plotted at %{x:.1f} y<extra></extra>")
-            fig.update_xaxes(type="log", title="Return period (years)")
-            fig.update_yaxes(title="mm")
-            st.plotly_chart(style(fig, 360, title=SERIES_LABEL[k]), width="stretch")
-            st.dataframe(
-                t.set_index("return_period")[["return_level", "ci_lower", "ci_upper"]]
-                .rename(columns={"return_level": "Return level (mm)", "ci_lower": "95% CI low", "ci_upper": "95% CI high"})
-                .style.format("{:.0f}"),
-                width="stretch",
-            )
-    st.markdown("**Goodness of fit**")
-    fits = D["fits"].copy()
-    fits["selected"] = fits["selected"].map({True: "✓", False: ""})
+    st.markdown("#### Zone priority")
+    fig = go.Figure(go.Bar(
+        x=zone_scores["priority_score"], y=zone_scores["Zone Name"], orientation="h",
+        marker_color=SERIES["rain_1d"],
+        customdata=zone_scores[["population", "children", "seniors", "effective_probability"]],
+        hovertemplate=("%{y}<br>Priority: %{x:.1f}/100<br>Population: %{customdata[0]:,.0f}"
+                       "<br>Children (0-14): %{customdata[1]:,.0f}"
+                       "<br>Older residents (60+): %{customdata[2]:,.0f}"
+                       "<br>Heavy-rain probability: %{customdata[3]:.1%}<extra></extra>"),
+    ))
+    fig.update_xaxes(title="Relative preparedness priority (0-100)")
+    fig.update_yaxes(autorange="reversed")
+    st.plotly_chart(style(fig, max(340, 28 * len(zone_scores)), title="Population-weighted zone ranking"),
+                    width="stretch")
     st.dataframe(
-        fits[["accumulation", "dist", "selected", "xi", "aic", "ks_stat", "ks_pvalue", "log_likelihood"]]
-        .style.format({"xi": "{:.3f}", "aic": "{:.1f}", "ks_stat": "{:.3f}", "ks_pvalue": "{:.3f}",
-                       "log_likelihood": "{:.1f}"}, na_rep="–"),
+        zone_scores[["Zone Name", "Next 24h rainfall (mm)", "Observed 3-day total (mm)",
+                     "model_probability", "effective_probability", "wards", "population", "children", "youth",
+                     "adults", "seniors", "priority_score"]].rename(columns={
+                         "model_probability": "Model probability",
+                         "effective_probability": "Probability incl. IMD warning",
+                         "wards": "Ward count", "population": "Population (2011)",
+                         "children": "Children (0-14)", "youth": "Youth (15-24)",
+                         "adults": "Adults (25-60)", "seniors": "Older residents (60+)",
+                         "priority_score": "Priority / 100",
+                     }).style.format({"Next 24h rainfall (mm)": "{:.1f}", "Observed 3-day total (mm)": "{:.1f}",
+                                      "Model probability": "{:.1%}", "Probability incl. IMD warning": "{:.1%}",
+                                      "Population (2011)": "{:,.0f}", "Children (0-14)": "{:,.0f}",
+                                      "Youth (15-24)": "{:,.0f}", "Adults (25-60)": "{:,.0f}",
+                                      "Older residents (60+)": "{:,.0f}", "Priority / 100": "{:.1f}"}),
         hide_index=True, width="stretch",
     )
-    lr = s["gev_vs_gumbel_lr_test"]
-    st.caption(
-        "GEV is selected only if it beats Gumbel by more than 2 AIC units. Likelihood-ratio test of ξ = 0: "
-        + "; ".join(f"{SERIES_LABEL[k]} p = {v['pvalue']:.3f}" for k, v in lr.items()) + "."
-    )
+
+# --------------------------------------------------------------------------- Power stations
+
+with tabs[2]:
+    st.subheader("Power station relief priority")
+    station_data = load_station_priorities(ZONES, zone_scores)
+    station_priorities, generation_metrics = fit_station_generation_regression(station_data)
+    st.markdown("#### Multiple regression")
+    st.caption("OLS predicts station output from capacity, prior-year output, and rainfall-weighted population. Predicted output shares prescribe the relief split.")
+    m1, m2, m3 = st.columns(3)
+    m1.metric("Holdout MAE", f"{generation_metrics['mae']:,.0f}")
+    m2.metric("Holdout RMSE", f"{generation_metrics['rmse']:,.0f}")
+    m3.metric("Holdout R²", f"{generation_metrics['r2']:.2f}")
+    st.caption(f"Random station holdout · {generation_metrics['n_train']} train / {generation_metrics['n_test']} test · 54 Tamil Nadu stations.")
+
+    st.markdown("#### Proposed relief split")
+    st.caption("Each station's share is its predicted output divided by total predicted output. Population reliance is proxied by prior-year output share; no customer map is available.")
+
+    top = station_priorities.head(15).copy()
+    fig = go.Figure(go.Bar(
+        x=top["relief_resource_share_pct"], y=top["station"], orientation="h",
+        marker_color=SERIES["rain_1d"],
+        customdata=top[["estimated_exposed_population", "capacity_mw", "predicted_actual_ytd"]],
+        hovertemplate=("%{y}<br>Resource share: %{x:.1f}%<br>Exposed population proxy: %{customdata[0]:,.0f}"
+                       "<br>Capacity: %{customdata[1]:,.0f} MW"
+                       "<br>Predicted output: %{customdata[2]:,.0f}<extra></extra>"),
+    ))
+    fig.update_xaxes(title="Proposed relief-resource share (%)")
+    fig.update_yaxes(autorange="reversed")
+    st.plotly_chart(style(fig, 460, title="Top 15 proposed station allocations"), width="stretch")
+
+    station_table = station_priorities[["station", "sector", "capacity_mw", "previous_actual_ytd",
+                                        "predicted_actual_ytd", "weighted_prioritized_population",
+                                        "estimated_exposed_population", "relief_resource_share_pct"]].rename(columns={
+        "station": "Station", "sector": "Sector", "capacity_mw": "Capacity (MW)",
+        "previous_actual_ytd": "Prior-year output, Apr-Jan", "predicted_actual_ytd": "Predicted output, Apr-Jan",
+        "weighted_prioritized_population": "Weighted prioritized population",
+        "estimated_exposed_population": "Exposed population proxy",
+        "relief_resource_share_pct": "Relief share (%)",
+    })
+    st.dataframe(station_table.style.format({
+        "Capacity (MW)": "{:,.1f}", "Predicted output, Apr-Jan": "{:,.1f}",
+        "Prior-year output, Apr-Jan": "{:,.1f}", "Weighted prioritized population": "{:,.0f}",
+        "Exposed population proxy": "{:,.0f}", "Relief share (%)": "{:.1f}",
+    }, na_rep="Not reported"), hide_index=True, width="stretch")
+    c1, c2 = st.columns(2)
+    with c1:
+        actual = generation_metrics["test_actual"]
+        predicted = generation_metrics["test_predicted"]
+        fig = go.Figure(go.Scatter(x=actual, y=predicted, mode="markers", marker_color=SERIES["rain_1d"]))
+        bounds = [min(actual.min(), predicted.min()), max(actual.max(), predicted.max())]
+        fig.add_scatter(x=bounds, y=bounds, mode="lines", line=dict(color=MUTED, dash="dot"), name="Perfect fit")
+        fig.update_xaxes(title="Observed generation")
+        fig.update_yaxes(title="Predicted generation")
+        st.plotly_chart(style(fig, 320, title="Holdout: actual vs predicted generation"), width="stretch")
+    with c2:
+        coeff = generation_metrics["coefficients"].rename({
+            "capacity_mw": "Capacity", "previous_actual_ytd": "Prior-year generation",
+            "weighted_prioritized_population": "Weighted prioritized population",
+        })
+        fig = go.Figure(go.Bar(x=coeff.values, y=coeff.index, orientation="h", marker_color=SERIES["rain_3d"]))
+        fig.update_xaxes(title="Standardized regression coefficient")
+        st.plotly_chart(style(fig, 320, title="Regression predictors"), width="stretch")
 
 # --------------------------------------------------------------------------- Decision matrix
 
 with tabs[3]:
-    st.subheader("Weighted decision matrix")
+    st.subheader("Decision Matrix")
+    st.markdown("#### Actions for the current forecast")
+    if not out.actions:
+        st.info("No actions triggered for this rainfall tier.")
+    else:
+        st.dataframe(
+            pd.DataFrame(out.actions)[["rank", "name", "min_tier", "score"]],
+            hide_index=True, width="stretch",
+            column_config={
+                "rank": st.column_config.NumberColumn("#", width="small"),
+                "name": st.column_config.TextColumn("Action", width="large"),
+                "min_tier": st.column_config.TextColumn("Triggered from"),
+                "score": st.column_config.ProgressColumn("Priority score", min_value=0, max_value=1,
+                                                         format="%.3f"),
+            },
+        )
+    st.divider()
     ahp = ahp_weights(D["pairwise"].to_numpy())
     c1, c2 = st.columns([3, 2], gap="large")
     with c1:
@@ -402,103 +481,3 @@ with tabs[3]:
     st.markdown("**One-at-a-time ±25% weight perturbation**")
     st.dataframe(D["oat"].style.format({"kendall_tau": "{:.3f}", "top3_overlap": "{:.0%}"}),
                  hide_index=True, width="stretch")
-
-# --------------------------------------------------------------------------- Validation
-
-with tabs[4]:
-    st.subheader("Do known Chennai floods land in the top tiers?")
-    st.caption("No flood labels exist at this resolution, so the check is whether documented flood "
-               "episodes are ranked as Alert or Emergency.")
-    ev = D["events"]
-    hit = s.get("known_event_hit_rate_alert_plus")
-    m1, m2, m3 = st.columns(3)
-    m1.metric("Events reaching Alert or above", f"{hit:.0%}" if hit == hit else "–")
-    he = s.get("known_event_hit_rate_emergency")
-    m2.metric("Events reaching Emergency", f"{he:.0%}" if he == he else "–")
-    td = D["tier_dist"]
-    m3.metric("Alert-or-above days per year", f"{td.loc[['Alert', 'Emergency'], 'days_per_year'].sum():.1f}")
-
-    show = ev[ev["in_record"]].copy()
-    show["peak_tier"] = show["peak_tier"].map(lambda t: f"{TIER_ICON[t]} {t}")
-    st.dataframe(
-        show[["event", "peak_date", "peak_tier", "max_rain_1d", "max_rain_3d", "max_return_period",
-              "severity_percentile", "days_alert_or_above"]],
-        hide_index=True, width="stretch",
-        column_config={
-            "max_rain_1d": st.column_config.NumberColumn("Max 1-day (mm)", format="%.0f"),
-            "max_rain_3d": st.column_config.NumberColumn("Max 3-day (mm)", format="%.0f"),
-            "max_return_period": st.column_config.NumberColumn("Max return period (y)", format="%.1f"),
-            "severity_percentile": st.column_config.NumberColumn("Severity pct of all days", format="%.3f"),
-        },
-    )
-
-    if len(show):
-        pick = st.selectbox("Inspect event", show["event"])
-        e = show[show["event"] == pick].iloc[0]
-        cls = D["classified"]
-        win = cls.loc[pd.Timestamp(e["start"]) - pd.Timedelta(days=10): pd.Timestamp(e["end"]) + pd.Timedelta(days=10)]
-        fig = go.Figure()
-        fig.add_vrect(x0=pd.Timestamp(e["start"]), x1=pd.Timestamp(e["end"]) + pd.Timedelta(hours=23), fillcolor="#e1e0d9",
-                      opacity=0.5, line_width=0, annotation_text="documented flood", annotation_font_color=MUTED)
-        fig.add_bar(x=win.index, y=win["rain_1d"], name=SERIES_LABEL["rain_1d"], marker_color=SERIES["rain_1d"],
-                    hovertemplate="%{x|%d %b}: %{y:.0f} mm<extra></extra>")
-        fig.add_scatter(x=win.index, y=win["rain_3d"], name=SERIES_LABEL["rain_3d"], mode="lines",
-                        line=dict(color=SERIES["rain_3d"], width=2),
-                        hovertemplate="%{x|%d %b}: %{y:.0f} mm<extra></extra>")
-        th = D["thresholds"]
-        for t in ("Alert", "Emergency"):
-            fig.add_hline(y=th.loc[t, "rain_3d"], line=dict(color=TIER_COLOR[t], dash="dot", width=1),
-                          annotation_text=f"{TIER_ICON[t]} {t} (3-day)", annotation_font_color=MUTED,
-                          annotation_position="top left")
-        fig.update_yaxes(title="mm")
-        st.plotly_chart(style(fig, 360, title=pick, bargap=0.3), width="stretch")
-
-    c1, c2 = st.columns(2, gap="large")
-    with c1:
-        st.markdown("**How often each tier fires (all history)**")
-        st.dataframe(td.style.format({"days": "{:.0f}", "share_pct": "{:.2f}%", "days_per_year": "{:.2f}"}),
-                     width="stretch")
-    with c2:
-        st.markdown("**Top 15 Alert-or-above episodes on record**")
-        ep = D["episodes"].head(15).copy()
-        ep["peak_tier"] = ep["peak_tier"].map(lambda t: f"{TIER_ICON[t]} {t}")
-        st.dataframe(ep, hide_index=True, width="stretch",
-                     column_config={c: st.column_config.NumberColumn(format="%.0f")
-                                    for c in ("max_rain_1d", "max_rain_3d", "max_return_period")})
-
-    ty = D["tier_year"]
-    fig = go.Figure()
-    for t in ("Watch", "Alert", "Emergency"):
-        fig.add_bar(x=ty.index, y=ty[t], name=f"{TIER_ICON[t]} {t}", marker_color=TIER_COLOR[t],
-                    hovertemplate="%{x}: %{y} days<extra>" + t + "</extra>")
-    fig.update_yaxes(title="Days")
-    st.plotly_chart(style(fig, 300, title="Elevated-tier days per year", barmode="stack", bargap=0.15),
-                    width="stretch")
-
-# --------------------------------------------------------------------------- About
-
-with tabs[5]:
-    st.markdown(
-        """
-#### Method
-1. **Data**: IMD daily gridded rainfall (0.25°, 1901–2024), read with `imdlib`. The Chennai series is
-   the mean of the valid land cells covering the city.
-2. **Features**: 1-day rainfall and trailing 3-day accumulation; calendar-year maxima of each.
-3. **Extremes**: Gumbel and GEV fitted by maximum likelihood to the annual maxima; selection by AIC and a
-   likelihood-ratio test; return levels with bootstrap 95% confidence intervals.
-4. **Tiers**: a day is *Watch* if either accumulation is above the 95th percentile of wet days, *Alert* at a
-   2-year return period, *Emergency* at 10 years (see `configs/thresholds.yaml`).
-5. **Actions**: each tier triggers a set of actions (`configs/actions.yaml`), scored on five criteria.
-   Weights come from an AHP pairwise matrix (consistency ratio < 0.10) and the ranking is stress-tested
-   with one-at-a-time and Monte Carlo weight perturbation.
-6. **Trend**: Mann-Kendall with Sen's slope, and OLS with a confidence interval, on annual maxima.
-7. **Validation**: documented flood episodes (2005, 2015, 2016, 2021, 2023) should rank in the top tiers.
-
-#### Limitations
-* Rainfall alone cannot show whether a particular road or ward will flood. The 25 km grid supports
-  **city-level** statements only.
-* With no historical flood labels, this is a **preparedness-ranking model**, not a validated flood predictor.
-* Criterion scores for actions are expert judgements and should be reviewed with the Greater Chennai Corporation.
-* Coastal grid cells are masked in the IMD product, so the city mean leans on the inland cells.
-"""
-    )

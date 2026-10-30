@@ -16,7 +16,7 @@ INK, INK_2, MUTED, GRID, AXIS = "#0b0b0b", "#52514e", "#898781", "#e1e0d9", "#c3
 def style(fig: go.Figure, height: int = 360, **layout) -> go.Figure:
     fig.update_layout(
         height=height,
-        margin=dict(l=8, r=8, t=36, b=8),
+        margin=dict(l=8, r=8, t=72, b=8),
         font=dict(family="system-ui, -apple-system, Segoe UI, sans-serif", color=INK_2, size=13),
         plot_bgcolor="#fcfcfb",
         paper_bgcolor="rgba(0,0,0,0)",
