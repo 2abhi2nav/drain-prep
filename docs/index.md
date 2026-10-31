@@ -17,7 +17,7 @@ Urban flooding in coastal metropolises like Chennai is shaped by intense, locali
 - **Extreme Value Modeling**: Fits Generalized Extreme Value (GEV) and Gumbel distributions to block maxima, using Akaike Information Criterion (AIC) and Likelihood Ratio tests to model return periods ($T$) and return levels with bootstrap confidence intervals.
 - **4-Tier Operational Flood Risk Architecture**: Classifies risk into **Normal**, **Watch**, **Alert**, and **Emergency** tiers using empirical percentiles and return periods.
 - **Multi-Criteria Decision Analysis (AHP + MCDA)**: Prioritizes 9 critical municipal actions using Saaty’s Analytic Hierarchy Process (AHP) and Simple Additive Weighting (SAW), evaluated against Dirichlet Monte Carlo and One-At-A-Time sensitivity analyses.
-- **Interactive Decision Dashboard**: A comprehensive Streamlit interface with real-time what-if scenario testing, historical timeline diagnostics, and risk analytics.
+- **Interactive Decision Dashboard**: A FastAPI + Plotly web interface with real-time what-if scenario testing, rainfall-model diagnostics, and zone-level crew allocation.
 
 ---
 
@@ -28,7 +28,7 @@ Explore the detailed architecture, mathematical methodologies, data specificatio
 | Document | Description |
 | :--- | :--- |
 | [**CSE Student & Developer Guide**](file:///c:/Users/krish/Desktop/dev/drain-prep/docs/explanation.md) | **Complete blueprint for Computer Science students**: In-depth theoretical walkthrough, math intuition (EVT, AHP, Dirichlet Monte Carlo), step-by-step modular code architecture, and engineering edge cases needed to rebuild this system from scratch. |
-| [**Architecture & Design**](file:///c:/Users/krish/Desktop/dev/drain-prep/docs/architecture.md) | High-level system architecture, module layout, data flow through ingestion, transformation, risk classification, decision modeling, and Streamlit presentation. |
+| [**Architecture & Design**](file:///c:/Users/krish/Desktop/dev/drain-prep/docs/architecture.md) | High-level system architecture, module layout, data flow through ingestion, transformation, risk classification, decision modeling, and the FastAPI web presentation layer. |
 | [**Mathematical & Statistical Methodology**](file:///c:/Users/krish/Desktop/dev/drain-prep/docs/methodology.md) | Mathematical theory covering Block Maxima, GEV vs. Gumbel fitting, AIC model selection, Return Periods, Bootstrap CIs, Mann-Kendall & Sen's slope trends, ECDF, AHP, and Dirichlet Monte Carlo. |
 | [**Data Pipeline & Ingestion**](file:///c:/Users/krish/Desktop/dev/drain-prep/docs/data_pipeline.md) | IMD gridded binary extraction, spatial masking, rolling accumulations, pipeline stages, and file schemas for raw, interim, and processed data. |
 | [**Decision Model & AHP**](file:///c:/Users/krish/Desktop/dev/drain-prep/docs/decision_model.md) | Operational criteria, Saaty pairwise comparison matrix, consistency ratio verification, municipal actions catalog, dynamic tier filtering, and sensitivity analysis. |
@@ -41,6 +41,7 @@ Explore the detailed architecture, mathematical methodologies, data specificatio
 
 - **Source Code**: [`src/drainage_rec/`](file:///c:/Users/krish/Desktop/dev/drain-prep/src/drainage_rec/)
 - **Configuration Files**: [`configs/`](file:///c:/Users/krish/Desktop/dev/drain-prep/configs/)
-- **Streamlit App Entrypoint**: [`src/drainage_rec/dashboard/app.py`](file:///c:/Users/krish/Desktop/dev/drain-prep/src/drainage_rec/dashboard/app.py)
+- **FastAPI App Entrypoint**: [`src/drainage_rec/web_api.py`](../src/drainage_rec/web_api.py)
+- **Web Client**: [`web/`](../web/)
 - **CLI Entrypoint**: [`src/drainage_rec/cli.py`](file:///c:/Users/krish/Desktop/dev/drain-prep/src/drainage_rec/cli.py)
 - **Pipeline Runner**: [`scripts/run_pipeline.py`](file:///c:/Users/krish/Desktop/dev/drain-prep/scripts/run_pipeline.py)

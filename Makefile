@@ -19,4 +19,4 @@ test:
 	$(PY) -m pytest -q
 
 dashboard:
-	$(PY) -m streamlit run src/drainage_rec/dashboard/app.py
+	$(PY) -m uvicorn drainage_rec.web_api:app --reload

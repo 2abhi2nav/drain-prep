@@ -78,7 +78,7 @@ The entire project operates as a directional, acyclic processing pipeline:
               [AHP Multi-Criteria Decision Matrix (5 criteria, 9 actions)]
                           │
                           ▼
-              [Ranked Action Output + Streamlit Dashboard / CLI]
+              [Ranked Action Output + FastAPI Web Dashboard / CLI]
 ```
 
 ---
@@ -361,9 +361,9 @@ If you are rebuilding this from scratch, implement these 8 modular files in orde
 ### Module 7: `drainage_rec/pipeline.py`
 - Coordinates execution: reads daily series $\implies$ features $\implies$ fits $\implies$ classifies $\implies$ scores actions $\implies$ writes CSV and JSON artifacts to `data/processed/`.
 
-### Module 8: `drainage_rec/cli.py` & `dashboard/app.py`
+### Module 8: `drainage_rec/cli.py`, `web_api.py` & `web/`
 - Implements CLI subcommands (`download`, `pipeline`, `recommend`).
-- Implements Streamlit web interface with interactive Plotly return level curves and what-if sliders.
+- FastAPI serves model endpoints and the vanilla JavaScript dashboard with interactive Plotly charts.
 
 ---
 

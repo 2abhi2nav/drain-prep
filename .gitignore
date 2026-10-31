@@ -17,3 +17,7 @@ outputs/**/*
 
 .streamlit/secrets.toml
 .ipynb_checkpoints/
+
+# Frontend packages (vanilla JS; pnpm artifacts from earlier setup)
+**/node_modules/
+web/dist/

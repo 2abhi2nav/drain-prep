@@ -37,36 +37,61 @@ def _scale_01(values: pd.Series) -> pd.Series:
     return (values - low) / (high - low)
 
 
-def score_power_preparedness(zones: pd.DataFrame, probabilities, warning: str) -> pd.DataFrame:
-    """Rank zones by logistic heavy-rain probability and normalized population components."""
+def score_power_preparedness(zones: pd.DataFrame, probabilities, warning: str,
+                             forecast_percentiles=None) -> pd.DataFrame:
+    """Rank zones by next-day model risk, IMD rainfall signal, and population exposure."""
     warning_severity = {"No warning": 0.0, "Yellow": 0.35, "Orange": 0.7, "Red": 1.0}
     out = zones.copy()
     out["model_probability"] = np.asarray(probabilities, dtype=float)
-    out["effective_probability"] = np.maximum(out["model_probability"], warning_severity[warning])
+    out["forecast_percentile"] = (
+        np.asarray(forecast_percentiles, dtype=float) if forecast_percentiles is not None else 0.0
+    )
+    out["forecast_severity"] = (
+        out["forecast_percentile"] / 100
+    )
+    out["risk_index"] = np.maximum.reduce((
+        out["model_probability"].to_numpy(),
+        np.broadcast_to(out["forecast_severity"], len(out)),
+        np.full(len(out), warning_severity[warning]),
+    ))
     out["weighted_exposure"] = out["population"] + 0.5 * out["children"] + 1.5 * out["seniors"]
     out["population_component"] = _scale_01(out["population"])
     # Per-capita weighting keeps vulnerable age composition influential beyond total population size.
     out["vulnerability_index"] = 0.5 * out["children"] / out["population"] + 1.5 * out["seniors"] / out["population"]
     out["vulnerability_component"] = _scale_01(out["vulnerability_index"])
-    out["priority_score"] = 100 * out["effective_probability"] * (
+    out["priority_score"] = 100 * out["risk_index"] * (
         0.65 * out["population_component"] + 0.35 * out["vulnerability_component"]
     )
     out["risk_level"] = np.where(
-        warning_severity[warning] > out["model_probability"],
+        (warning != "No warning") & (warning_severity[warning] >= np.maximum(out["model_probability"], out["forecast_severity"])),
         f"IMD {warning} warning",
-        np.where(out["model_probability"] >= 0.5, "Elevated model probability", "Lower model probability"),
+        np.where(out["risk_index"] >= 0.5, "Elevated rainfall signal", "Lower rainfall signal"),
     )
     return out.sort_values("priority_score", ascending=False).reset_index(drop=True)
+
+
+def allocate_resources(zones: pd.DataFrame, resource_units: int) -> pd.DataFrame:
+    """Allocate a finite integer resource pool by zone priority using largest remainders."""
+    out = zones.copy()
+    weights = out["priority_score"].to_numpy(dtype=float)
+    shares = weights / weights.sum() if weights.sum() else np.full(len(out), 1 / len(out))
+    exact = shares * int(resource_units)
+    allocation = np.floor(exact).astype(int)
+    remaining = int(resource_units) - int(allocation.sum())
+    if remaining:
+        order = np.argsort(-(exact - allocation))
+        allocation[order[:remaining]] += 1
+    out["resource_share_pct"] = shares * 100
+    out["recommended_resources"] = allocation
+    return out
 
 
 def _numeric(series: pd.Series) -> pd.Series:
     return pd.to_numeric(series.astype(str).str.replace(",", "", regex=False), errors="coerce")
 
 
-def load_station_priorities(demographics: pd.DataFrame | None = None,
-                            zone_predictions: pd.DataFrame | None = None,
-                            path: Path = POWER_DATA_PATH) -> pd.DataFrame:
-    """Prepare Tamil Nadu station, prior-output, and rainfall-weighted population inputs."""
+def load_station_profiles(path: Path = POWER_DATA_PATH) -> pd.DataFrame:
+    """Load observed Tamil Nadu generating-station capacity and output comparisons."""
     raw = pd.read_csv(path)
     stations = raw[
         raw["State"].astype(str).str.strip().eq("Tamil Nadu")
@@ -80,67 +105,13 @@ def load_station_priorities(demographics: pd.DataFrame | None = None,
     stations["actual_ytd"] = _numeric(stations[actual_col]).fillna(0)
     stations["previous_actual_ytd"] = _numeric(stations[previous_actual_col]).fillna(0)
     stations = stations[stations["capacity_mw"].fillna(0) > 0].copy()
-
-    zones = demographics if demographics is not None else load_zone_demographics()
-    zones = zones.copy()
-    zones["weighted_exposure"] = zones["population"] + 0.5 * zones["children"] + 1.5 * zones["seniors"]
-    if zone_predictions is not None:
-        zones = zones.merge(zone_predictions[["Zone Name", "effective_probability"]], on="Zone Name", how="left")
-        zones["effective_probability"] = zones["effective_probability"].fillna(0)
-    else:
-        zones["effective_probability"] = 1.0
-    expected_population = float((zones["population"] * zones["effective_probability"]).sum())
-    expected_weighted_population = float((zones["weighted_exposure"] * zones["effective_probability"]).sum())
-    previous_generation_share = stations["previous_actual_ytd"] / stations["previous_actual_ytd"].sum()
-    stations["previous_generation_share"] = previous_generation_share
-    stations["estimated_population_proxy"] = previous_generation_share * expected_population
-    stations["weighted_prioritized_population"] = previous_generation_share * expected_weighted_population
+    stations["generation_change_pct"] = 100 * (
+        stations["actual_ytd"] - stations["previous_actual_ytd"]
+    ) / stations["previous_actual_ytd"].where(stations["previous_actual_ytd"] > 0)
     stations = stations.rename(columns={
         "Category": "station",
         "Sector Category": "sector",
         "Stations": "fuel_type",
         "Plant Load Factor (%) - January` 2024 - Actual - Col (14)": "january_plf_pct",
     })
-    return stations.reset_index(drop=True)
-
-
-def fit_station_generation_regression(stations: pd.DataFrame, seed: int = 42) -> tuple[pd.DataFrame, dict]:
-    """Predict current generation, then propose resource shares from predicted station output."""
-    feature_cols = ["capacity_mw", "previous_actual_ytd", "weighted_prioritized_population"]
-    x = np.log1p(stations[feature_cols].clip(lower=0).to_numpy(dtype=float))
-    y = stations["actual_ytd"].to_numpy(dtype=float)
-    rng = np.random.default_rng(seed)
-    order = rng.permutation(len(stations))
-    test_n = max(1, round(len(stations) * 0.2))
-    test_idx, train_idx = order[:test_n], order[test_n:]
-    mean, scale = x[train_idx].mean(axis=0), x[train_idx].std(axis=0)
-    scale[scale == 0] = 1
-    x_train = (x[train_idx] - mean) / scale
-    x_test = (x[test_idx] - mean) / scale
-    beta = np.linalg.lstsq(np.column_stack((np.ones(len(train_idx)), x_train)), y[train_idx], rcond=None)[0]
-    test_prediction = np.maximum(0, beta[0] + x_test @ beta[1:])
-    residual = y[test_idx] - test_prediction
-    ss_total = np.sum((y[test_idx] - y[test_idx].mean()) ** 2)
-    metrics = {
-        "rmse": float(np.sqrt(np.mean(residual ** 2))),
-        "mae": float(np.mean(np.abs(residual))),
-        "r2": float(1 - np.sum(residual ** 2) / ss_total) if ss_total else float("nan"),
-        "test_actual": y[test_idx],
-        "test_predicted": test_prediction,
-        "coefficients": pd.Series(beta[1:], index=feature_cols),
-        "n_train": len(train_idx),
-        "n_test": len(test_idx),
-    }
-
-    all_x = (x - mean) / scale
-    out = stations.copy()
-    out["predicted_actual_ytd"] = np.maximum(0, beta[0] + all_x @ beta[1:])
-    total_predicted_generation = out["predicted_actual_ytd"].sum()
-    out["predicted_generation_share"] = (
-        out["predicted_actual_ytd"] / total_predicted_generation if total_predicted_generation else 0
-    )
-    expected_population = out["estimated_population_proxy"].sum()
-    out["estimated_exposed_population"] = out["predicted_generation_share"] * expected_population
-    out["relief_resource_share_pct"] = 100 * out["predicted_generation_share"]
-    out["regression_priority_score"] = out["relief_resource_share_pct"]
-    return out.sort_values("regression_priority_score", ascending=False).reset_index(drop=True), metrics
+    return stations.sort_values("actual_ytd", ascending=False).reset_index(drop=True)

@@ -66,7 +66,7 @@ flowchart TD
 
     subgraph InferenceAndPresentation["6. Operational Interfaces"]
         CLI["Command Line Interface\n(drainage-rec CLI)"]
-        DASH["Interactive Streamlit Dashboard\n(Plotly / What-If Testing)"]
+        DASH["Interactive Web Dashboard\n(FastAPI + Plotly / What-If Testing)"]
         RECS["JSON Recommendations\n(Priority Actions & Tiers)"]
         
         MODEL_JSON --> CLI
@@ -134,9 +134,9 @@ drain-prep/
 │       ├── validation/                     # Empirical model validation
 │       │   ├── known_events.py             # Historical flood event scorecard and hit rates
 │       │   └── backtest.py                 # Alert episode duration and historical backtesting
-│       ├── dashboard/                      # Interactive visualization
-│       │   ├── app.py                      # Multi-tab Streamlit dashboard
-│       │   └── theme.py                    # Color palettes, tier badges, and styling constants
+│       ├── web_api.py                      # FastAPI endpoints and static web serving
+│       ├── dashboard/theme.py              # Report figure styling constants
+│       └── web/                            # Vanilla JavaScript client
 │       └── utils/                          # Common helpers
 │           ├── config.py                   # YAML config loader and filesystem paths
 │           └── io.py                       # Safe I/O for series, tables, and JSON
@@ -181,7 +181,7 @@ The system operates across four well-defined data layers:
      - `summary.json`: Top-level validation metrics, fit parameters, and sensitivity statistics.
 
 4. **Presentation & Inference Layer**:
-   - The CLI and Streamlit dashboard load pre-computed models and data tables directly from `data/processed/`.
+   - The CLI and FastAPI web dashboard load pre-computed models and data tables directly from `data/processed/`.
    - Inference does not require refitting distributions or recalculating historical timeseries: `Recommender.load()` reads `model.json` and evaluates arbitrary incoming rainfall combinations in sub-millisecond time.
 
 ---

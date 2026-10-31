@@ -10,15 +10,15 @@ from scipy.stats import rankdata
 
 from ..utils.io import read_city_series
 
-FEATURES = ["log_1d_rain", "log_3d_rain", "month_sin", "month_cos"]
+FEATURES = ["log_3d_rain_prior", "month_sin", "month_cos"]
 HEAVY_RAIN_MM = 64.5
 HOLDOUT_YEAR = 2015
 
 
-def _feature_matrix(rain_1d, rain_3d, month) -> np.ndarray:
-    r1, r3, m = np.broadcast_arrays(rain_1d, rain_3d, month)
+def _feature_matrix(rain_3d_prior, month) -> np.ndarray:
+    r3, m = np.broadcast_arrays(rain_3d_prior, month)
     angle = 2 * np.pi * (m.astype(float) - 1) / 12
-    return np.column_stack((np.log1p(r1.ravel()), np.log1p(r3.ravel()), np.sin(angle).ravel(), np.cos(angle).ravel()))
+    return np.column_stack((np.log1p(r3.ravel()), np.sin(angle).ravel(), np.cos(angle).ravel()))
 
 
 def _auc(y: np.ndarray, probability: np.ndarray) -> float:
@@ -38,18 +38,20 @@ class HeavyRainLogisticModel:
     metrics: dict
     test_data: pd.DataFrame
 
-    def predict_probability(self, rain_1d, rain_3d, month) -> np.ndarray:
-        x = (_feature_matrix(rain_1d, rain_3d, month) - self.mean) / self.scale
+    def predict_probability(self, rain_3d_prior, month) -> np.ndarray:
+        x = (_feature_matrix(rain_3d_prior, month) - self.mean) / self.scale
         return expit(self.coefficients[0] + x @ self.coefficients[1:])
 
 
 def fit_heavy_rain_model(daily: pd.Series | None = None) -> HeavyRainLogisticModel:
     """Fit on pre-2015 observations and evaluate chronologically on 2015 onward."""
     daily = read_city_series() if daily is None else daily.sort_index()
-    frame = pd.DataFrame({"rain_1d": daily, "rain_3d": daily.rolling(3, min_periods=1).sum()})
+    frame = pd.DataFrame({"rain_1d": daily})
+    frame["rain_3d_prior"] = daily.rolling(3, min_periods=3).sum().shift(1)
     frame["month"] = frame.index.month
     frame["heavy_rain"] = (frame["rain_1d"] >= HEAVY_RAIN_MM).astype(int)
-    x = _feature_matrix(frame["rain_1d"].to_numpy(), frame["rain_3d"].to_numpy(), frame["month"].to_numpy())
+    frame = frame.dropna(subset=["rain_3d_prior"])
+    x = _feature_matrix(frame["rain_3d_prior"].to_numpy(), frame["month"].to_numpy())
     y = frame["heavy_rain"].to_numpy(dtype=float)
     train = frame.index.year < HOLDOUT_YEAR
     x_train, y_train = x[train], y[train]
@@ -75,15 +77,23 @@ def fit_heavy_rain_model(daily: pd.Series | None = None) -> HeavyRainLogisticMod
     fp = int((predicted & (y_test == 0)).sum())
     fn = int(((~predicted) & (y_test == 1)).sum())
     tp = int((predicted & (y_test == 1)).sum())
-    test = frame.loc[~train, ["rain_1d", "rain_3d", "heavy_rain"]].copy()
+    test = frame.loc[~train, ["rain_1d", "rain_3d_prior", "heavy_rain"]].copy()
     test["probability"] = probabilities
     calibration = []
     for indices in np.array_split(np.argsort(probabilities), 10):
         if len(indices):
+            observed = float(y_test[indices].mean())
+            n = len(indices)
+            z = 1.96
+            denominator = 1 + z * z / n
+            center = (observed + z * z / (2 * n)) / denominator
+            half_width = z * np.sqrt(observed * (1 - observed) / n + z * z / (4 * n * n)) / denominator
             calibration.append({
                 "predicted": float(probabilities[indices].mean()),
-                "observed": float(y_test[indices].mean()),
-                "n": len(indices),
+                "observed": observed,
+                "ci_lower": max(0.0, center - half_width),
+                "ci_upper": min(1.0, center + half_width),
+                "n": n,
             })
     order = np.argsort(-probabilities)
     sorted_y = y_test[order]

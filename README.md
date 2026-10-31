@@ -2,7 +2,7 @@
 
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](https://opensource.org/licenses/MIT)
-[![Streamlit](https://img.shields.io/badge/Streamlit-1.30+-FF4B4B.svg)](https://streamlit.io)
+[![FastAPI](https://img.shields.io/badge/API-FastAPI-009688.svg)](https://fastapi.tiangolo.com/)
 [![Code style: black](https://img.shields.io/badge/code%20style-black-000000.svg)](https://github.com/psf/black)
 
 An operational, data-driven decision-support system designed to translate incoming and historical rainfall into risk-tiered urban drainage preparedness actions for Chennai, India.
@@ -53,7 +53,7 @@ flowchart TD
 
     subgraph PresentationLayer["4. User & Operational Interfaces"]
         CLI["drainage-rec CLI\n(download / pipeline / recommend)"]
-        DASH["Streamlit Interactive Dashboard\n(Plotly Analytics & What-If Testing)"]
+        DASH["Vanilla JS Web Platform\n(FastAPI + Interactive Plotly)"]
         RECS[("Action Plan & Priority Scores\n(JSON / Terminal Reports)")]
         SAW --> CLI --> RECS
         SAW --> DASH
@@ -75,7 +75,7 @@ flowchart TD
   - **Emergency**: $\ge 10\text{-year}$ return period on annual maxima ($R_{1d} \ge 192.5\text{ mm}$ or $R_{3d} \ge 336.1\text{ mm}$). Full disaster mobilization.
 - **Multi-Criteria Action Prioritization (AHP)**: Weights 5 operational criteria (Impact 40.8%, Urgency 25.1%, Lead Time 14.5%, Feasibility 13.2%, Affordability 6.4%) with a Consistency Ratio of $\text{CR} = 0.0098 \ll 0.10$.
 - **Empirical Validation on Ground Truth Floods**: Achieves a **100% Hit Rate on Alert+** and **71.4% on Emergency** across Chennai's major recorded floods (2005, 2015, 2016, 2021, 2023).
-- **Interactive Web Dashboard**: Full-featured Streamlit application featuring scenario testing, historical flood backtesting, and sensitivity diagnostics.
+- **Interactive Web Platform**: FastAPI serves a dependency-free JavaScript dashboard with rainfall forecast, zone population priorities, and power-station profiles.
 
 ---
 
@@ -117,13 +117,13 @@ make pipeline
 drainage-rec pipeline
 ```
 
-### 5. Launch the Streamlit Dashboard
+### 5. Launch the Web Platform
 ```bash
 make dashboard
-# Or directly via streamlit:
-streamlit run src/drainage_rec/dashboard/app.py
+# Or directly:
+.venv/bin/uvicorn drainage_rec.web_api:app --reload
 ```
-Open your browser at `http://localhost:8501`.
+Open your browser at `http://localhost:8000`.
 
 ### 6. Run Operational Recommendations via CLI
 Input any observed or forecasted 1-day and 3-day rainfall:
@@ -223,7 +223,9 @@ drain-prep/
 │   ├── risk/                               # RiskModel and 4-tier classification logic
 │   ├── decision/                           # AHP, SAW matrix, and sensitivity engines
 │   ├── validation/                         # Historical backtesting and hit-rate evaluation
-│   ├── dashboard/                          # Streamlit application and Plotly styling
+│   ├── web_api.py                           # FastAPI models API and static web server
+│   ├── dashboard/theme.py                   # Shared report-figure styling
+│   └── web/                                  # Vanilla JavaScript client
 │   └── utils/                              # YAML loaders and I/O helpers
 └── tests/                                  # Comprehensive pytest suite
 ```

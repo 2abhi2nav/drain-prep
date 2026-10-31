@@ -16,12 +16,12 @@ dependencies = [
     "pymannkendall",
     "statsmodels",
     "pyyaml",
-    "streamlit",
     "plotly",
 ]
 
 [project.optional-dependencies]
 dev = ["pytest", "matplotlib"]
+api = ["fastapi>=0.115", "uvicorn[standard]>=0.30"]
 
 [project.scripts]
 drainage-rec = "drainage_rec.cli:main"
