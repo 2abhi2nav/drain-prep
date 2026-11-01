@@ -28,7 +28,7 @@ jobs:
           python-version: "3.12"
       - uses: actions/setup-node@v4
         with:
-          node-version: "20"
+          node-version: "26"
       - run: pip install -r requirements.txt
       - run: python scripts/export_static_site.py
       - run: python scripts/check_static_parity.py
