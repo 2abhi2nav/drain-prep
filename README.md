@@ -199,6 +199,65 @@ git push       # Vercel redeploys automatically
 
 ---
 
+## 🌐 Deployment (GitHub Pages)
+
+GitHub Pages serves static files only, so this branch ships a **client-side port of
+the API** instead of the FastAPI service. The interface and the numbers are the
+same; there is no server and no cold start.
+
+### How it works
+
+| Piece | Role |
+| :--- | :--- |
+| `scripts/export_static_site.py` | Runs the real Python models and writes `_site/`: a copy of `web/` plus `data/bootstrap.json`, `data/power-stations.json`, and `data/static-model.json` (fit parameters, wet-day climatology, logistic coefficients) |
+| `web/static-api.js` | Intercepts the frontend's `/api/*` fetches and reimplements `/api/forecast` and `/api/population-priority` in the browser (percentile, return period, tiering, logistic probability, zone scoring, crew allocation). Injected into `_site/index.html` only, so Vercel keeps the real backend |
+| `.github/workflows/pages.yml` | Builds `_site/`, verifies parity, and deploys with `actions/deploy-pages` |
+| `scripts/check_static_parity.py` | Compares the JavaScript results against the Python endpoints on forecast and 10-zone scenarios; the workflow fails on any drift above `1e-9` |
+
+### One-time setup
+
+1. Push `feat/github-pages` to GitHub.
+2. Repo **Settings → Pages → Build and deployment → Source: GitHub Actions**.
+3. The push runs the **Deploy static site to GitHub Pages** workflow; the site is
+   published at `https://<owner>.github.io/drain-prep/` (the workflow's run page
+   shows the exact URL).
+
+To publish from `main` instead, change the `branches` trigger in
+`.github/workflows/pages.yml`.
+
+### Local preview
+
+```bash
+python scripts/export_static_site.py
+python scripts/check_static_parity.py      # requires Node 18+
+python -m http.server 8000 --directory _site
+```
+
+Open `http://localhost:8000`. Everything runs client-side, so the browser console
+must stay clean and no `/api/*` request should reach the network.
+
+### Refreshing the published data
+
+The site embeds the model artifacts at build time. After `make pipeline`:
+
+```bash
+python scripts/export_static_site.py
+git add data/processed/model.json data/interim/chennai_daily.csv
+git commit -m "Refresh model artifacts"
+git push        # workflow rebuilds and redeploys
+```
+
+### Limitations
+
+- The Python API is the reference implementation; `web/static-api.js` duplicates
+  its risk and allocation logic. `scripts/check_static_parity.py` guards against
+  divergence — run it after changing either side.
+- There is no server-side validation, persistence, or rate limiting; the static
+  endpoint checks mirror the Pydantic bounds but are advisory only.
+- The station table and model metadata are snapshots from the last build.
+
+---
+
 ## 📋 Municipal Actions & Priority Rankings
 
 The model prioritizes 9 core municipal actions configured in [`configs/actions.yaml`](file:///c:/Users/krish/Desktop/dev/drain-prep/configs/actions.yaml). Actions trigger cumulatively based on the active risk tier:
@@ -244,6 +303,7 @@ drain-prep/
 ├── app.py                                  # Vercel ASGI entrypoint
 ├── vercel.json                             # Vercel region and bundle configuration
 ├── .python-version                         # Python 3.12 for the Vercel build
+├── .github/workflows/pages.yml             # GitHub Pages build and deploy
 ├── pyproject.toml                          # Build definitions and package dependencies
 ├── configs/                                # Declarative YAML configuration files
 │   ├── study_area.yaml                     # Spatial bounding box and grid aggregation rules
@@ -262,7 +322,9 @@ drain-prep/
 │   └── cli_and_api.md                      # Complete CLI options and Python API reference
 ├── scripts/                                # Automation scripts
 │   ├── run_pipeline.py                     # Pipeline execution runner
-│   └── generate_report_figures.py          # Static matplotlib figure generator
+│   ├── generate_report_figures.py          # Static matplotlib figure generator
+│   ├── export_static_site.py               # Builds the GitHub Pages site (_site/)
+│   └── check_static_parity.py              # Python-vs-JavaScript API parity check
 ├── src/drainage_rec/                       # Core Python package
 │   ├── cli.py                              # CLI entrypoint
 │   ├── pipeline.py                         # End-to-end analytical pipeline
@@ -279,6 +341,7 @@ drain-prep/
 ├── web/                                    # Vanilla JavaScript client (served by FastAPI)
 │   ├── index.html                          # Single-page shell
 │   ├── app.js                              # Dashboard logic and Plotly charts
+│   ├── static-api.js                       # GitHub Pages shim for /api/* (not on Vercel)
 │   ├── plotly-basic.min.js                 # Vendored chart bundle (fits Vercel response cap)
 │   └── src/styles.css                      # Styles
 └── tests/                                  # Comprehensive pytest suite
