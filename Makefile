@@ -4,7 +4,8 @@ PY ?= .venv/bin/python
 
 install:
 	python3 -m venv .venv
-	$(PY) -m pip install -r requirements.txt
+	$(PY) -m pip install --upgrade pip
+	$(PY) -m pip install -e '.[dev,api]'
 
 data:
 	$(PY) -m drainage_rec.cli download

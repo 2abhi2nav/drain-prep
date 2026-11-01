@@ -6,10 +6,8 @@ from pathlib import Path
 import numpy as np
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import Response
 from pydantic import BaseModel, Field
 from fastapi.staticfiles import StaticFiles
-from plotly.offline import get_plotlyjs
 
 from drainage_rec.power import (
     allocate_resources,
@@ -115,7 +113,7 @@ def bootstrap():
 
 @app.post("/api/forecast")
 def forecast(request: RainfallRequest):
-    assessment = RECOMMENDER.model.assess(request.rain_1d, request.rain_1d)
+    assessment = RECOMMENDER.model.assess(request.rain_1d, request.rain_3d)
     probability = float(RAIN_MODEL.predict_probability(request.rain_3d, request.month)[0])
     forecast_percentile = float(RECOMMENDER.model.percentile("rain_1d", request.rain_1d))
     return {
@@ -155,11 +153,6 @@ def power_stations():
         "sectors": sector.to_dict("records"),
         "period": "April 2023–January 2024 vs prior-year period",
     }
-
-
-@app.get("/plotly.js")
-def plotly_bundle():
-    return Response(get_plotlyjs(), media_type="application/javascript")
 
 
 WEB_DIR = Path(__file__).resolve().parents[2] / "web"

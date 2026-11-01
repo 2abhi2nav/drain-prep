@@ -12,6 +12,11 @@ data/raw/*
 data/interim/*
 data/processed/*
 !data/**/.gitkeep
+
+# Committed on purpose: the deployed API loads the fitted model and the daily
+# rainfall series at import time. Everything else under data/ stays regenerable.
+!data/processed/model.json
+!data/interim/chennai_daily.csv
 outputs/**/*
 !outputs/**/.gitkeep
 

@@ -1,0 +1,23 @@
+.git
+.venv
+venv
+__pycache__
+*.py[cod]
+.pytest_cache
+.mypy_cache
+.ruff_cache
+
+docs
+tests
+scripts
+outputs
+*.docx
+*.pdf
+.ipynb_checkpoints
+
+# Keep the runtime data referenced by the API, drop the bulk.
+data/raw
+data/interim/years
+
+.streamlit/secrets.toml
+.env

@@ -152,6 +152,53 @@ drainage-rec recommend --rain-1d 210 --rain-3d 390 --json
 
 ---
 
+## ☁️ Deployment (Vercel)
+
+The FastAPI app is both the API and the frontend host. `app.py` exposes the ASGI
+`app`, Vercel routes every request to it, and FastAPI serves `web/` at `/` plus the
+JSON endpoints under `/api/*`.
+
+### One-time project setup
+
+1. Push this branch to GitHub (the two runtime data artifacts are committed — see below).
+2. In [Vercel](https://vercel.com/new), **Import** the repository.
+3. Keep the defaults: root directory = repo root, framework preset **FastAPI**
+   (auto-detected from `app.py`), no build command override.
+4. Deploy. Vercel reads the Python version from `.python-version` (3.12).
+5. Verify `https://<project>.vercel.app/api/health` returns `{"status":"ok"}`.
+
+No environment variables or secrets are required.
+
+### What makes it deployable
+
+| File | Purpose |
+| :--- | :--- |
+| `app.py` | Vercel entrypoint; puts `src/` on `sys.path` so the package works without an editable install |
+| `requirements.txt` | Lean runtime only (FastAPI, uvicorn, numpy, pandas, scipy, pyyaml), keeping the bundle well inside Vercel's 500 MB Python limit |
+| `.python-version` | Pins Python 3.12 (Vercel supports 3.12–3.14) |
+| `vercel.json` | Mumbai region (`bom1`), 60 s max duration, excludes tests/docs/raw data from the bundle |
+| `.vercelignore` | Keeps the upload small (raw IMD grids, years/, docs, tests) |
+| `web/plotly-basic.min.js` | Vendored 1.19 MB bundle; the full 4.59 MB plotly.js exceeds Vercel's 4.5 MB response cap |
+| `data/processed/model.json`, `data/interim/chennai_daily.csv` | Loaded at import; committed because rebuilding them needs the full IMD archive |
+
+### Cold starts
+
+The API fits the logistic heavy-rain model and loads `model.json` during import,
+so the first request after an idle period takes roughly 5 seconds. Warm requests
+take milliseconds. This can be optimised later by serialising the fitted model.
+
+### Refreshing deployed data
+
+```bash
+make data      # only when the IMD archive changes
+make pipeline
+git add data/processed/model.json data/interim/chennai_daily.csv
+git commit -m "Refresh model artifacts"
+git push       # Vercel redeploys automatically
+```
+
+---
+
 ## 📋 Municipal Actions & Priority Rankings
 
 The model prioritizes 9 core municipal actions configured in [`configs/actions.yaml`](file:///c:/Users/krish/Desktop/dev/drain-prep/configs/actions.yaml). Actions trigger cumulatively based on the active risk tier:
@@ -194,6 +241,9 @@ Empirical validation against recorded major flood events in Chennai demonstrates
 ```
 drain-prep/
 ├── Makefile                                # Top-level build and run commands
+├── app.py                                  # Vercel ASGI entrypoint
+├── vercel.json                             # Vercel region and bundle configuration
+├── .python-version                         # Python 3.12 for the Vercel build
 ├── pyproject.toml                          # Build definitions and package dependencies
 ├── configs/                                # Declarative YAML configuration files
 │   ├── study_area.yaml                     # Spatial bounding box and grid aggregation rules
@@ -225,8 +275,12 @@ drain-prep/
 │   ├── validation/                         # Historical backtesting and hit-rate evaluation
 │   ├── web_api.py                           # FastAPI models API and static web server
 │   ├── dashboard/theme.py                   # Shared report-figure styling
-│   └── web/                                  # Vanilla JavaScript client
 │   └── utils/                              # YAML loaders and I/O helpers
+├── web/                                    # Vanilla JavaScript client (served by FastAPI)
+│   ├── index.html                          # Single-page shell
+│   ├── app.js                              # Dashboard logic and Plotly charts
+│   ├── plotly-basic.min.js                 # Vendored chart bundle (fits Vercel response cap)
+│   └── src/styles.css                      # Styles
 └── tests/                                  # Comprehensive pytest suite
 ```
 

@@ -1,1 +1,8 @@
--e .[dev,api]
+# Runtime dependencies for the FastAPI service served on Vercel.
+# Install these plus the package itself with: make install
+fastapi>=0.115
+uvicorn>=0.30
+numpy
+pandas
+scipy
+pyyaml
