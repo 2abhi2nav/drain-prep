@@ -96,13 +96,15 @@ def bootstrap():
         ).to_dict("records"),
         "imd_products": IMD_PRODUCTS,
         "forecast_model": {
-            "target": "Next-day heavy rain: at least 64.5 mm in 24 hours",
+            "target": f"Next-day heavy rain: at least {RAIN_MODEL.heavy_rain_threshold_mm} mm in 24 hours",
             "features": ["previous 3-day rainfall", "seasonal month"],
             "train_period": "1901–2014",
             "holdout_period": [metrics["test_start"], metrics["test_end"]],
+            "heavy_rain_threshold_mm": RAIN_MODEL.heavy_rain_threshold_mm,
             "metrics": {key: metrics[key] for key in ("auc", "average_precision", "brier", "precision", "recall", "best_f1", "f1_threshold")},
             "confusion": metrics["confusion"].tolist(),
             "roc": metrics["roc"].to_dict("records"),
+            "precision_recall": metrics["precision_recall"].to_dict("records"),
             "f1_curve": metrics["f1_curve"].to_dict("records"),
             "calibration": metrics["calibration"].to_dict("records"),
             "coefficients": [{"feature": key, "value": float(value)}

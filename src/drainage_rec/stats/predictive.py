@@ -37,6 +37,7 @@ class HeavyRainLogisticModel:
     coefficients: np.ndarray
     metrics: dict
     test_data: pd.DataFrame
+    heavy_rain_threshold_mm: float = HEAVY_RAIN_MM
 
     def predict_probability(self, rain_3d_prior, month) -> np.ndarray:
         x = (_feature_matrix(rain_3d_prior, month) - self.mean) / self.scale

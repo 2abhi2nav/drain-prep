@@ -76,6 +76,12 @@ function drawForecastCharts() {
     { type: "scatter", mode: "lines", x: model.roc.map((row) => row.false_positive_rate), y: model.roc.map((row) => row.true_positive_rate), name: "Model", line: { color: "#f5a742", width: 2.5 } },
     { type: "scatter", mode: "lines", x: [0, 1], y: [0, 1], name: "Chance", line: { color: "#68716d", dash: "dot" } },
   ], { xaxis: { ...chartLayout.xaxis, title: "False positive rate", range: [0, 1] }, yaxis: { ...chartLayout.yaxis, title: "True positive rate", range: [0, 1] } });
+  const pr = model.precision_recall;
+  const baseline = model.metrics.average_precision;
+  drawPlot("pr-chart", [
+    { type: "scatter", mode: "lines", x: pr.map((row) => row.recall), y: pr.map((row) => row.precision), name: "Model", line: { color: "#f5a742", width: 2.5 }, fill: "tozeroy", fillcolor: "rgba(245,167,66,0.08)" },
+    { type: "scatter", mode: "lines", x: [0, 1], y: [baseline, baseline], name: `AP ${baseline.toFixed(3)}`, line: { color: "#68716d", dash: "dot" } },
+  ], { xaxis: { ...chartLayout.xaxis, title: "Recall", range: [0, 1] }, yaxis: { ...chartLayout.yaxis, title: "Precision", range: [0, 1] } });
   const curve = model.f1_curve;
   drawPlot("f1-chart", [
     { type: "scatter", mode: "lines", x: curve.map((row) => row.threshold), y: curve.map((row) => row.f1), name: "F1", line: { color: "#f5a742", width: 2.5 } },
@@ -135,6 +141,7 @@ function sectionHeader(index, label, title, note = "") {
 function forecastView() {
   const result = state.forecast;
   const model = state.bootstrap.forecast_model;
+  const threshold = model.heavy_rain_threshold_mm;
   const links = state.bootstrap.imd_products.slice(0, 2);
   return `<section class="content-section">
     ${sectionHeader("01", "RAINFALL OUTLOOK", "Forecast desk", `<span class="orange-dot"></span> Chennai`)}
@@ -146,21 +153,22 @@ function forecastView() {
           <label class="field"><span>Prior 3-day total</span><div class="input-wrap"><input name="rain3" type="number" min="0" max="2000" value="${state.rain3}" /><b>mm</b></div></label>
         </div>
         <label class="field month-field"><span>Forecast month</span><select name="month">${MONTHS.map((name, i) => `<option value="${i + 1}" ${state.month === i + 1 ? "selected" : ""}>${name}</option>`).join("")}</select></label>
-        <button class="primary-button" ${state.busy === "forecast" ? "disabled" : ""}>${state.busy === "forecast" ? "Calculating…" : "Run forecast"}<span aria-hidden="true">↗</span></button>
+        <button class="primary-button" type="submit" ${state.busy === "forecast" ? "disabled" : ""}>${state.busy === "forecast" ? "Calculating…" : "Run forecast"}<span aria-hidden="true">↗</span></button>
         <div class="imd-links">${links.map((link) => `<a href="${link.url}" target="_blank" rel="noreferrer">${esc(link.label)}<span>↗</span></a>`).join("")}</div>
       </form>
       <div class="panel forecast-result"><div class="panel-top"><span class="panel-title">Heavy-rain likelihood</span><span class="panel-code">LOGISTIC / 24H</span></div>
         ${result ? `<div class="forecast-reading"><span>${percent(result.heavy_rain_probability)}</span><small>next-day probability given the prior 3-day total</small></div>
           <div class="reading-rule"><i style="width:${Math.max(2, result.heavy_rain_probability * 100)}%"></i></div>
-          <div class="reading-bottom"><span>≥ 64.5 mm / 24h</span><span class="tier-chip tier-${result.assessment.tier.toLowerCase()}">${esc(result.assessment.tier)}</span></div>
+          <div class="reading-bottom"><span>≥ ${threshold} mm / 24h</span><span class="tier-chip tier-${result.assessment.tier.toLowerCase()}">${esc(result.assessment.tier)}</span></div>
           <div class="result-metrics"><div class="result-metric"><span>FORECAST NEXT 24H</span><b>${num(state.rain1)} <i>mm</i></b><small>${result.forecast_percentile.toFixed(1)}th historical percentile</small></div><div class="result-metric"><span>PRIOR 3-DAY TOTAL</span><b>${num(state.rain3)} <i>mm</i></b><small>Logistic model input</small></div></div>
-          <div class="scenario-note">${state.rain1 >= 64.5 ? "The scenario forecast itself exceeds the 64.5 mm heavy-rain threshold; the model probability is a separate antecedent-conditions estimate." : "The scenario forecast is below the heavy-rain threshold; the probability estimates next-day risk from antecedent conditions."}</div>` : `<div class="empty-result"><span class="empty-cloud">⌁</span><span>Enter a rainfall scenario to view its historical risk.</span></div>`}
+          <div class="scenario-note">${state.rain1 >= threshold ? `The scenario forecast itself exceeds the ${threshold} mm heavy-rain threshold; the model probability is a separate antecedent-conditions estimate.` : "The scenario forecast is below the heavy-rain threshold; the probability estimates next-day risk from antecedent conditions."}</div>` : `<div class="empty-result"><span class="empty-cloud">⌁</span><span>Enter a rainfall scenario to view its historical risk.</span></div>`}
       </div>
     </div>
-    <div class="model-strip"><span class="model-strip-title">● NEXT-DAY HEAVY-RAIN LOGISTIC</span><span>Features: prior 3-day rain + season</span><span>Holdout: ${esc(model.holdout_period[0])} — ${esc(model.holdout_period[1])}</span><span>Threshold: 64.5 mm</span></div>
+    <div class="model-strip"><span class="model-strip-title">● NEXT-DAY HEAVY-RAIN LOGISTIC</span><span>Features: prior 3-day rain + season</span><span>Holdout: ${esc(model.holdout_period[0])} — ${esc(model.holdout_period[1])}</span><span>Threshold: ${threshold} mm</span></div>
     <div class="model-metrics">${metric("ROC AUC", model.metrics.auc.toFixed(3))}${metric("Average precision", model.metrics.average_precision.toFixed(3))}${metric("Brier score", model.metrics.brier.toFixed(3))}${metric("Best F1", `${model.metrics.best_f1.toFixed(3)} @ ${percent(model.metrics.f1_threshold)}`)}</div>
     <div class="chart-grid two-col">
       <div class="chart-card"><div class="chart-heading"><span>ROC curve</span><span class="chart-unit">Zoom · hover</span></div><div id="roc-chart" class="plotly-chart"></div></div>
+      <div class="chart-card"><div class="chart-heading"><span>Precision-recall curve</span><span class="chart-unit">AP ${model.metrics.average_precision.toFixed(3)}</span></div><div id="pr-chart" class="plotly-chart"></div></div>
       <div class="chart-card"><div class="chart-heading"><span>F1 vs threshold</span><span class="chart-unit">Best @ ${percent(model.metrics.f1_threshold)}</span></div><div id="f1-chart" class="plotly-chart"></div></div>
       <div class="chart-card"><div class="chart-heading"><span>Calibration deciles</span><span class="chart-unit">95% intervals</span></div><div id="calibration-chart" class="plotly-chart"></div></div>
       <div class="chart-card"><div class="chart-heading"><span>Model coefficients</span><span class="chart-unit">Zero centered</span></div><div id="logistic-coefficients" class="plotly-chart"></div></div>
@@ -246,8 +254,10 @@ async function run(action, callback) {
   render();
   try { await callback(); }
   catch (error) { state.error = error.message ?? "Request failed"; }
-  state.busy = "";
-  render();
+  finally {
+    state.busy = "";
+    render();
+  }
 }
 
 document.addEventListener("click", (event) => {
