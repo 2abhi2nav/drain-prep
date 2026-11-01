@@ -72,11 +72,38 @@ def fit_heavy_rain_model(daily: pd.Series | None = None) -> HeavyRainLogisticMod
         raise RuntimeError(f"Heavy-rain logistic fit failed: {result.message}")
     beta = result.x
     probabilities = expit(beta[0] + x_test_scaled @ beta[1:])
-    predicted = probabilities >= 0.5
-    tn = int(((~predicted) & (y_test == 0)).sum())
-    fp = int((predicted & (y_test == 0)).sum())
-    fn = int(((~predicted) & (y_test == 1)).sum())
-    tp = int((predicted & (y_test == 1)).sum())
+
+    def rates(threshold):
+        predicted = probabilities >= threshold
+        tn = int(((~predicted) & (y_test == 0)).sum())
+        fp = int((predicted & (y_test == 0)).sum())
+        fn = int(((~predicted) & (y_test == 1)).sum())
+        tp = int((predicted & (y_test == 1)).sum())
+        precision = tp / (tp + fp) if tp + fp else 0.0
+        recall = tp / (tp + fn) if tp + fn else 0.0
+        f1 = 2 * precision * recall / (precision + recall) if precision + recall else 0.0
+        return tn, fp, fn, tp, precision, recall, f1
+
+    curve = []
+    best = None
+    for threshold in np.unique(probabilities):
+        tn, fp, fn, tp, precision, recall, f1 = rates(threshold)
+        curve.append({
+            "threshold": float(threshold),
+            "precision": float(precision),
+            "recall": float(recall),
+            "f1": float(f1),
+        })
+        if best is None or f1 > best["f1"]:
+            best = {
+                "threshold": float(threshold),
+                "precision": float(precision),
+                "recall": float(recall),
+                "f1": float(f1),
+            }
+    f1_curve = pd.DataFrame(curve)
+    threshold, precision, recall, f1 = (best[key] for key in ("threshold", "precision", "recall", "f1"))
+    tn, fp, fn, tp, _, _, _ = rates(threshold)
     test = frame.loc[~train, ["rain_1d", "rain_3d_prior", "heavy_rain"]].copy()
     test["probability"] = probabilities
     calibration = []
@@ -107,12 +134,15 @@ def fit_heavy_rain_model(daily: pd.Series | None = None) -> HeavyRainLogisticMod
         "average_precision": average_precision,
         "brier": float(np.mean((probabilities - y_test) ** 2)),
         "accuracy": float((tp + tn) / len(y_test)),
-        "precision": float(tp / (tp + fp)) if tp + fp else 0.0,
-        "recall": float(tp / (tp + fn)) if tp + fn else 0.0,
+        "precision": float(precision),
+        "recall": float(recall),
+        "best_f1": float(f1),
+        "f1_threshold": float(threshold),
         "confusion": np.array([[tn, fp], [fn, tp]]),
         "calibration": pd.DataFrame(calibration),
         "roc": pd.DataFrame({"false_positive_rate": fpr, "true_positive_rate": tpr}),
         "precision_recall": pd.DataFrame({"recall": recall_curve, "precision": precision_curve}),
+        "f1_curve": f1_curve,
         "coefficients": pd.Series(beta[1:], index=FEATURES),
         "test_start": str(test.index.min().date()),
         "test_end": str(test.index.max().date()),

@@ -43,7 +43,20 @@ const chartConfig = { responsive: true, displaylogo: false, modeBarButtonsToRemo
 
 function drawPlot(id, traces, layout = {}) {
   const target = document.getElementById(id);
-  if (target && window.Plotly) Plotly.newPlot(target, traces, { ...chartLayout, ...layout }, chartConfig);
+  if (!target || !window.Plotly) return;
+  const merged = { ...chartLayout, ...layout, font: { ...chartLayout.font, ...(layout.font || {}), color: "#ffffff" } };
+  merged.legend = { ...chartLayout.legend, ...(layout.legend || {}), font: { color: "#ffffff" } };
+  for (const key of ["xaxis", "yaxis"]) {
+    const axis = { ...chartLayout[key], ...(layout[key] || {}) };
+    axis.tickfont = { ...(axis.tickfont || {}), color: "#ffffff" };
+    if (axis.title != null) {
+      axis.title = typeof axis.title === "string"
+        ? { text: axis.title, font: { color: "#ffffff" } }
+        : { ...axis.title, font: { ...(axis.title.font || {}), color: "#ffffff" } };
+    }
+    merged[key] = axis;
+  }
+  Plotly.newPlot(target, traces, merged, chartConfig);
 }
 
 function drawZeroCenteredBar(id, rows, name) {
@@ -63,8 +76,14 @@ function drawForecastCharts() {
     { type: "scatter", mode: "lines", x: model.roc.map((row) => row.false_positive_rate), y: model.roc.map((row) => row.true_positive_rate), name: "Model", line: { color: "#f5a742", width: 2.5 } },
     { type: "scatter", mode: "lines", x: [0, 1], y: [0, 1], name: "Chance", line: { color: "#68716d", dash: "dot" } },
   ], { xaxis: { ...chartLayout.xaxis, title: "False positive rate", range: [0, 1] }, yaxis: { ...chartLayout.yaxis, title: "True positive rate", range: [0, 1] } });
-  drawPlot("pr-chart", [{ type: "scatter", mode: "lines", x: model.precision_recall.map((row) => row.recall), y: model.precision_recall.map((row) => row.precision), name: "Model", line: { color: "#f5a742", width: 2.5 } }], {
-    xaxis: { ...chartLayout.xaxis, title: "Recall", range: [0, 1] }, yaxis: { ...chartLayout.yaxis, title: "Precision", range: [0, 1] },
+  const curve = model.f1_curve;
+  drawPlot("f1-chart", [
+    { type: "scatter", mode: "lines", x: curve.map((row) => row.threshold), y: curve.map((row) => row.f1), name: "F1", line: { color: "#f5a742", width: 2.5 } },
+    { type: "scatter", mode: "lines", x: curve.map((row) => row.threshold), y: curve.map((row) => row.precision), name: "Precision", line: { color: "#c8cecb", width: 1, dash: "dot" } },
+    { type: "scatter", mode: "lines", x: curve.map((row) => row.threshold), y: curve.map((row) => row.recall), name: "Recall", line: { color: "#858b88", width: 1, dash: "dot" } },
+    { type: "scatter", mode: "markers", x: [model.metrics.f1_threshold], y: [model.metrics.best_f1], name: "Best F1", marker: { size: 10, color: "#f5a742", line: { color: "#101111", width: 1 } }, hovertemplate: "Threshold %{x:.1%}<br>F1 %{y:.3f}<extra></extra>" },
+  ], {
+    xaxis: { ...chartLayout.xaxis, title: "Decision threshold", rangemode: "tozero", tickformat: ".0%" }, yaxis: { ...chartLayout.yaxis, title: "Score", range: [0, 1] },
   });
   drawPlot("calibration-chart", [
     { type: "scatter", mode: "markers", x: model.calibration.map((row) => row.predicted), y: model.calibration.map((row) => row.observed),
@@ -139,10 +158,10 @@ function forecastView() {
       </div>
     </div>
     <div class="model-strip"><span class="model-strip-title">● NEXT-DAY HEAVY-RAIN LOGISTIC</span><span>Features: prior 3-day rain + season</span><span>Holdout: ${esc(model.holdout_period[0])} — ${esc(model.holdout_period[1])}</span><span>Threshold: 64.5 mm</span></div>
-    <div class="model-metrics">${metric("ROC AUC", model.metrics.auc.toFixed(3))}${metric("Average precision", model.metrics.average_precision.toFixed(3))}${metric("Brier score", model.metrics.brier.toFixed(3))}${metric("Precision / recall", `${percent(model.metrics.precision)} / ${percent(model.metrics.recall)}`)}</div>
+    <div class="model-metrics">${metric("ROC AUC", model.metrics.auc.toFixed(3))}${metric("Average precision", model.metrics.average_precision.toFixed(3))}${metric("Brier score", model.metrics.brier.toFixed(3))}${metric("Best F1", `${model.metrics.best_f1.toFixed(3)} @ ${percent(model.metrics.f1_threshold)}`)}</div>
     <div class="chart-grid two-col">
       <div class="chart-card"><div class="chart-heading"><span>ROC curve</span><span class="chart-unit">Zoom · hover</span></div><div id="roc-chart" class="plotly-chart"></div></div>
-      <div class="chart-card"><div class="chart-heading"><span>Precision–recall</span><span class="chart-unit">Zoom · hover</span></div><div id="pr-chart" class="plotly-chart"></div></div>
+      <div class="chart-card"><div class="chart-heading"><span>F1 vs threshold</span><span class="chart-unit">Best @ ${percent(model.metrics.f1_threshold)}</span></div><div id="f1-chart" class="plotly-chart"></div></div>
       <div class="chart-card"><div class="chart-heading"><span>Calibration deciles</span><span class="chart-unit">95% intervals</span></div><div id="calibration-chart" class="plotly-chart"></div></div>
       <div class="chart-card"><div class="chart-heading"><span>Model coefficients</span><span class="chart-unit">Zero centered</span></div><div id="logistic-coefficients" class="plotly-chart"></div></div>
     </div>

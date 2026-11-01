@@ -72,7 +72,7 @@ h2 { font: 600 31px/1.1 var(--display); letter-spacing: -.04em; margin: 8px 0 0;
 .forecast-grid { display: grid; grid-template-columns: .93fr 1.07fr; gap: 14px; }
 .forecast-form, .forecast-result { min-height: 284px; padding: 22px; }
 .panel-top, .chart-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
-.panel-title, .chart-heading > span:first-child { font: 600 14px var(--display); }
+.panel-title, .chart-heading > span:first-child { font: 600 14px var(--display); color: #ffffff; }
 .panel-code, .chart-unit { font: 9px var(--mono); color: var(--muted); letter-spacing: .07em; text-transform: uppercase; }
 .field-row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 24px; }
 .field { min-width: 0; display: flex; flex-direction: column; gap: 8px; color: var(--muted); font: 10px var(--mono); letter-spacing: .04em; }

@@ -100,10 +100,10 @@ def bootstrap():
             "features": ["previous 3-day rainfall", "seasonal month"],
             "train_period": "1901–2014",
             "holdout_period": [metrics["test_start"], metrics["test_end"]],
-            "metrics": {key: metrics[key] for key in ("auc", "average_precision", "brier", "precision", "recall")},
+            "metrics": {key: metrics[key] for key in ("auc", "average_precision", "brier", "precision", "recall", "best_f1", "f1_threshold")},
             "confusion": metrics["confusion"].tolist(),
             "roc": metrics["roc"].to_dict("records"),
-            "precision_recall": metrics["precision_recall"].to_dict("records"),
+            "f1_curve": metrics["f1_curve"].to_dict("records"),
             "calibration": metrics["calibration"].to_dict("records"),
             "coefficients": [{"feature": key, "value": float(value)}
                              for key, value in metrics["coefficients"].items()],
