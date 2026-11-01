@@ -218,7 +218,7 @@ same; there is no server and no cold start.
 
 1. Push `feat/github-pages` to GitHub.
 2. Repo **Settings → Pages → Build and deployment → Source: GitHub Actions**.
-3. The push runs the **Deploy static site to GitHub Pages** workflow; the site is
+3. The push(and only push) runs the **Deploy static site to GitHub Pages** workflow; the site is
    published at `https://<owner>.github.io/drain-prep/` (the workflow's run page
    shows the exact URL).
 
